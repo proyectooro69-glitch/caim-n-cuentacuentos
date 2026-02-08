@@ -57,6 +57,15 @@ export default {
           border: "hsl(var(--sidebar-border))",
           ring: "hsl(var(--sidebar-ring))",
         },
+        // Pastel palette for children's app
+        pastel: {
+          pink: "hsl(var(--pastel-pink))",
+          mint: "hsl(var(--pastel-mint))",
+          lavender: "hsl(var(--pastel-lavender))",
+          yellow: "hsl(var(--pastel-yellow))",
+          blue: "hsl(var(--pastel-blue))",
+          peach: "hsl(var(--pastel-peach))",
+        },
       },
       borderRadius: {
         lg: "var(--radius)",
