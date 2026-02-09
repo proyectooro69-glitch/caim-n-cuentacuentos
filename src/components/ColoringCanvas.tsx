@@ -6,7 +6,6 @@ import { Eraser, Undo, Trash2 } from "lucide-react";
 interface ColoringCanvasProps {
   imageUrl: string | null;
   pageId: string;
-  sessionId: string;
   onSave: (drawingData: string) => void;
   initialDrawing?: string;
 }
@@ -25,7 +24,6 @@ const COLORS = [
 const ColoringCanvas = ({
   imageUrl,
   pageId,
-  sessionId,
   onSave,
   initialDrawing,
 }: ColoringCanvasProps) => {
@@ -52,12 +50,12 @@ const ColoringCanvas = ({
     const resizeCanvas = () => {
       const rect = container.getBoundingClientRect();
       const dpr = window.devicePixelRatio || 1;
-      
+
       canvas.width = rect.width * dpr;
       canvas.height = rect.height * dpr;
       canvas.style.width = `${rect.width}px`;
       canvas.style.height = `${rect.height}px`;
-      
+
       ctx.scale(dpr, dpr);
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
@@ -104,7 +102,7 @@ const ColoringCanvas = ({
     if (!canvas || !ctx) return;
 
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    setHistory((prev) => [...prev.slice(-10), imageData]); // Keep last 10 states
+    setHistory((prev) => [...prev.slice(-10), imageData]);
   }, []);
 
   const startDrawing = useCallback(
@@ -112,7 +110,7 @@ const ColoringCanvas = ({
       e.preventDefault();
       saveToHistory();
       setIsDrawing(true);
-      setShowBrush(false); // Hide brush on Android touch
+      setShowBrush(false);
       const pos = getCanvasCoords(e);
       lastPos.current = pos;
       setCursorPos(pos);
@@ -151,7 +149,7 @@ const ColoringCanvas = ({
       setIsDrawing(false);
       setShowBrush(true);
       lastPos.current = null;
-      
+
       // Save drawing
       const canvas = canvasRef.current;
       if (canvas) {
@@ -293,7 +291,7 @@ const ColoringCanvas = ({
           className="touch-friendly"
         >
           <Trash2 className="mr-2 h-4 w-4" />
-          Borrar todo
+          Limpiar dibujo
         </Button>
       </div>
     </div>

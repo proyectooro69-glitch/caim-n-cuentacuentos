@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -6,6 +6,7 @@ import { Loader2, ChevronLeft, ChevronRight, Volume2, VolumeX, Download, Home } 
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import ColoringCanvas from "@/components/ColoringCanvas";
+import jsPDF from "jspdf";
 
 interface StoryPage {
   id: string;
@@ -20,6 +21,11 @@ interface Story {
   theme: string;
 }
 
+const STORAGE_KEY_PREFIX = "coloring_drawing_";
+
+const getDrawingKey = (storyId: string, pageId: string) =>
+  `${STORAGE_KEY_PREFIX}${storyId}_${pageId}`;
+
 const StoryViewer = () => {
   const { shareCode } = useParams<{ shareCode: string }>();
   const [story, setStory] = useState<Story | null>(null);
@@ -27,16 +33,9 @@ const StoryViewer = () => {
   const [currentPage, setCurrentPage] = useState(0);
   const [loading, setLoading] = useState(true);
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const [sessionId] = useState(() => {
-    // Get or create session ID for this device/browser
-    let id = localStorage.getItem("story_session_id");
-    if (!id) {
-      id = crypto.randomUUID();
-      localStorage.setItem("story_session_id", id);
-    }
-    return id;
-  });
   const [drawings, setDrawings] = useState<Record<string, string>>({});
+  const [generatingPdf, setGeneratingPdf] = useState(false);
+  const speakingRef = useRef(false);
   const { toast } = useToast();
 
   // Load story and pages
@@ -45,7 +44,6 @@ const StoryViewer = () => {
       if (!shareCode) return;
 
       try {
-        // Fetch story by share code
         const { data: storyData, error: storyError } = await supabase
           .from("stories")
           .select("*")
@@ -64,7 +62,6 @@ const StoryViewer = () => {
 
         setStory(storyData);
 
-        // Fetch pages
         const { data: pagesData, error: pagesError } = await supabase
           .from("story_pages")
           .select("*")
@@ -74,22 +71,16 @@ const StoryViewer = () => {
         if (pagesError) throw pagesError;
         setPages(pagesData || []);
 
-        // Load saved drawings for all pages
+        // Load drawings from localStorage
         if (pagesData && pagesData.length > 0) {
-          const pageIds = pagesData.map((p) => p.id);
-          const { data: drawingsData } = await supabase
-            .from("page_drawings")
-            .select("*")
-            .in("page_id", pageIds)
-            .eq("session_id", sessionId);
-
-          if (drawingsData) {
-            const drawingsMap: Record<string, string> = {};
-            drawingsData.forEach((d) => {
-              drawingsMap[d.page_id] = d.drawing_data;
-            });
-            setDrawings(drawingsMap);
-          }
+          const drawingsMap: Record<string, string> = {};
+          pagesData.forEach((p) => {
+            const saved = localStorage.getItem(getDrawingKey(storyData.id, p.id));
+            if (saved) {
+              drawingsMap[p.id] = saved;
+            }
+          });
+          setDrawings(drawingsMap);
         }
       } catch (error) {
         console.error("Error loading story:", error);
@@ -104,63 +95,187 @@ const StoryViewer = () => {
     };
 
     loadStory();
-  }, [shareCode, sessionId, toast]);
+  }, [shareCode, toast]);
 
-  // Save drawing to database
+  // Save drawing to localStorage
   const handleSaveDrawing = useCallback(
-    async (drawingData: string) => {
+    (drawingData: string) => {
       const page = pages[currentPage];
-      if (!page) return;
+      if (!page || !story) return;
 
       setDrawings((prev) => ({ ...prev, [page.id]: drawingData }));
 
-      try {
-        const { error } = await supabase.from("page_drawings").upsert(
-          {
-            page_id: page.id,
-            session_id: sessionId,
-            drawing_data: drawingData,
-          },
-          { onConflict: "page_id,session_id" }
-        );
-
-        if (error) throw error;
-      } catch (error) {
-        console.error("Error saving drawing:", error);
+      if (drawingData) {
+        localStorage.setItem(getDrawingKey(story.id, page.id), drawingData);
+      } else {
+        localStorage.removeItem(getDrawingKey(story.id, page.id));
       }
     },
-    [pages, currentPage, sessionId]
+    [pages, currentPage, story]
   );
 
-  // Text-to-speech
-  const handleSpeak = () => {
+  // Text-to-speech - using ref to avoid re-render issues
+  const handleSpeak = useCallback(() => {
     const page = pages[currentPage];
     if (!page) return;
 
-    if (isSpeaking) {
+    if (speakingRef.current) {
       window.speechSynthesis.cancel();
+      speakingRef.current = false;
       setIsSpeaking(false);
       return;
     }
 
-    const utterance = new SpeechSynthesisUtterance(page.narrative_text);
-    utterance.lang = "es-ES";
-    utterance.rate = 0.9;
-    utterance.pitch = 1.1;
+    try {
+      const utterance = new SpeechSynthesisUtterance(page.narrative_text);
+      utterance.lang = "es-ES";
+      utterance.rate = 0.9;
+      utterance.pitch = 1.1;
 
-    utterance.onend = () => setIsSpeaking(false);
-    utterance.onerror = () => setIsSpeaking(false);
+      utterance.onend = () => {
+        speakingRef.current = false;
+        setIsSpeaking(false);
+      };
+      utterance.onerror = () => {
+        speakingRef.current = false;
+        setIsSpeaking(false);
+      };
 
-    setIsSpeaking(true);
-    window.speechSynthesis.speak(utterance);
-  };
+      speakingRef.current = true;
+      setIsSpeaking(true);
+      window.speechSynthesis.speak(utterance);
+    } catch (error) {
+      console.error("SpeechSynthesis error:", error);
+      speakingRef.current = false;
+      setIsSpeaking(false);
+    }
+  }, [pages, currentPage]);
 
   // Navigation
-  const goToPage = (pageNum: number) => {
+  const goToPage = useCallback((pageNum: number) => {
     window.speechSynthesis.cancel();
+    speakingRef.current = false;
     setIsSpeaking(false);
     setCurrentPage(pageNum);
-  };
+  }, []);
+
+  // PDF generation
+  const handleDownloadPdf = useCallback(async () => {
+    if (!story || pages.length === 0) return;
+
+    setGeneratingPdf(true);
+    try {
+      const pdf = new jsPDF("p", "mm", "a4");
+      const pageWidth = 210;
+      const pageHeight = 297;
+      const margin = 15;
+      const contentWidth = pageWidth - margin * 2;
+
+      for (let i = 0; i < pages.length; i++) {
+        if (i > 0) pdf.addPage();
+
+        const page = pages[i];
+
+        // Title on first page
+        if (i === 0) {
+          pdf.setFontSize(22);
+          pdf.setFont("helvetica", "bold");
+          pdf.text(story.title, pageWidth / 2, margin + 10, { align: "center" });
+          pdf.setFontSize(12);
+          pdf.setFont("helvetica", "normal");
+        }
+
+        // Page number
+        pdf.setFontSize(10);
+        pdf.setTextColor(150);
+        pdf.text(`Página ${i + 1} de ${pages.length}`, pageWidth / 2, pageHeight - 10, { align: "center" });
+        pdf.setTextColor(0);
+
+        // Narrative text
+        const textY = i === 0 ? margin + 20 : margin;
+        pdf.setFontSize(14);
+        pdf.setFont("helvetica", "normal");
+        const splitText = pdf.splitTextToSize(page.narrative_text, contentWidth);
+        pdf.text(splitText, margin, textY);
+
+        const textHeight = splitText.length * 7;
+        const imageY = textY + textHeight + 10;
+        const imageMaxH = pageHeight - imageY - 20;
+
+        // Draw the coloring image + drawing overlay
+        const drawingData = drawings[page.id];
+        
+        if (page.image_url || drawingData) {
+          // Create a composite canvas
+          const compositeCanvas = document.createElement("canvas");
+          const compW = 800;
+          const compH = 600;
+          compositeCanvas.width = compW;
+          compositeCanvas.height = compH;
+          const compCtx = compositeCanvas.getContext("2d");
+          if (compCtx) {
+            compCtx.fillStyle = "#ffffff";
+            compCtx.fillRect(0, 0, compW, compH);
+
+            // Draw coloring book image
+            if (page.image_url) {
+              try {
+                const bgImg = await loadImage(page.image_url);
+                compCtx.drawImage(bgImg, 0, 0, compW, compH);
+              } catch {
+                // skip if image fails
+              }
+            }
+
+            // Draw child's coloring on top with multiply
+            if (drawingData) {
+              try {
+                const drawImg = await loadImage(drawingData);
+                compCtx.globalCompositeOperation = "multiply";
+                compCtx.drawImage(drawImg, 0, 0, compW, compH);
+                compCtx.globalCompositeOperation = "source-over";
+              } catch {
+                // skip
+              }
+            }
+
+            const imgData = compositeCanvas.toDataURL("image/jpeg", 0.85);
+            const imgW = contentWidth;
+            const imgH = Math.min((contentWidth * compH) / compW, imageMaxH);
+            pdf.addImage(imgData, "JPEG", margin, imageY, imgW, imgH);
+          }
+        }
+      }
+
+      // Back cover
+      pdf.addPage();
+      pdf.setFontSize(28);
+      pdf.setFont("helvetica", "bold");
+      pdf.text("¡Fin!", pageWidth / 2, pageHeight / 2 - 20, { align: "center" });
+      pdf.setFontSize(14);
+      pdf.setFont("helvetica", "normal");
+      pdf.text("Creado con amor por", pageWidth / 2, pageHeight / 2, { align: "center" });
+      pdf.setFontSize(18);
+      pdf.setFont("helvetica", "bold");
+      pdf.text("Soluciones Digitales Caimán", pageWidth / 2, pageHeight / 2 + 12, { align: "center" });
+
+      // QR placeholder
+      pdf.setDrawColor(200);
+      pdf.setFillColor(245, 245, 245);
+      pdf.roundedRect(pageWidth / 2 - 25, pageHeight / 2 + 25, 50, 50, 3, 3, "FD");
+      pdf.setFontSize(8);
+      pdf.setTextColor(150);
+      pdf.text("Código QR", pageWidth / 2, pageHeight / 2 + 55, { align: "center" });
+
+      pdf.save(`${story.title}.pdf`);
+      toast({ title: "¡PDF descargado!", description: "Tu cuento coloreado está listo." });
+    } catch (error) {
+      console.error("Error generating PDF:", error);
+      toast({ title: "Error", description: "No se pudo generar el PDF", variant: "destructive" });
+    } finally {
+      setGeneratingPdf(false);
+    }
+  }, [story, pages, drawings, toast]);
 
   const currentPageData = pages[currentPage];
   const isFirstPage = currentPage === 0;
@@ -210,34 +325,50 @@ const StoryViewer = () => {
         </div>
       </header>
 
-      {/* Main content - responsive layout */}
+      {/* Main content */}
       <main className="flex-1 flex flex-col lg:flex-row overflow-hidden">
         {/* Text section */}
-        <div className="lg:w-1/3 p-4 lg:p-6 flex flex-col gap-4 bg-card/50">
+        <div className="lg:w-1/3 p-4 lg:p-6 flex flex-col gap-3 bg-card/50">
           <Card className="p-4 md:p-6 bg-card flex-1 overflow-auto">
             <p className="text-lg md:text-xl lg:text-2xl leading-relaxed font-medium">
               {currentPageData?.narrative_text}
             </p>
           </Card>
 
-          {/* Audio button */}
-          <Button
-            onClick={handleSpeak}
-            variant={isSpeaking ? "secondary" : "default"}
-            className="w-full h-14 text-lg rounded-xl touch-friendly"
-          >
-            {isSpeaking ? (
-              <>
-                <VolumeX className="mr-2 h-6 w-6" />
-                Detener
-              </>
-            ) : (
-              <>
-                <Volume2 className="mr-2 h-6 w-6" />
-                Escuchar
-              </>
-            )}
-          </Button>
+          {/* Audio + PDF buttons */}
+          <div className="flex gap-2">
+            <Button
+              onClick={handleSpeak}
+              variant={isSpeaking ? "secondary" : "default"}
+              className="flex-1 h-14 text-lg rounded-xl touch-friendly"
+            >
+              {isSpeaking ? (
+                <>
+                  <VolumeX className="mr-2 h-6 w-6" />
+                  Detener
+                </>
+              ) : (
+                <>
+                  <Volume2 className="mr-2 h-6 w-6" />
+                  Escuchar
+                </>
+              )}
+            </Button>
+            <Button
+              onClick={handleDownloadPdf}
+              disabled={generatingPdf}
+              variant="outline"
+              className="h-14 px-4 text-lg rounded-xl touch-friendly border-primary text-primary hover:bg-primary hover:text-primary-foreground"
+            >
+              {generatingPdf ? (
+                <Loader2 className="mr-2 h-6 w-6 animate-spin" />
+              ) : (
+                <Download className="mr-2 h-6 w-6" />
+              )}
+              <span className="hidden sm:inline">Descargar mi Cuento</span>
+              <span className="sm:hidden">PDF</span>
+            </Button>
+          </div>
         </div>
 
         {/* Coloring section */}
@@ -245,7 +376,6 @@ const StoryViewer = () => {
           <ColoringCanvas
             imageUrl={currentPageData?.image_url || null}
             pageId={currentPageData?.id || ""}
-            sessionId={sessionId}
             onSave={handleSaveDrawing}
             initialDrawing={drawings[currentPageData?.id || ""]}
           />
@@ -264,7 +394,6 @@ const StoryViewer = () => {
           <span className="hidden md:inline">Anterior</span>
         </Button>
 
-        {/* Page dots */}
         <div className="flex gap-2 overflow-x-auto py-2 px-1">
           {pages.map((_, idx) => (
             <button
@@ -292,5 +421,16 @@ const StoryViewer = () => {
     </div>
   );
 };
+
+// Helper to load an image as a promise
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
+}
 
 export default StoryViewer;
