@@ -6,6 +6,7 @@ import { Loader2, ChevronLeft, ChevronRight, Volume2, VolumeX, Download, Home } 
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import ColoringCanvas from "@/components/ColoringCanvas";
+import StoryCover from "@/components/StoryCover";
 import jsPDF from "jspdf";
 
 interface StoryPage {
@@ -170,20 +171,83 @@ const StoryViewer = () => {
       const pageHeight = 297;
       const margin = 15;
       const contentWidth = pageWidth - margin * 2;
+      const coverShareUrl = `${window.location.origin}/cuento/${shareCode}`;
 
+      // === COVER PAGE ===
+      // Decorative top band
+      pdf.setFillColor(244, 180, 196); // pastel pink
+      pdf.rect(0, 0, pageWidth, 8, "F");
+      pdf.setFillColor(180, 230, 210); // pastel mint
+      pdf.rect(0, 8, pageWidth, 4, "F");
+
+      // Title
+      pdf.setFontSize(32);
+      pdf.setFont("helvetica", "bold");
+      pdf.setTextColor(180, 60, 100);
+      pdf.text(story.title, pageWidth / 2, 40, { align: "center" });
+
+      // Theme subtitle
+      pdf.setFontSize(14);
+      pdf.setFont("helvetica", "italic");
+      pdf.setTextColor(120, 120, 120);
+      pdf.text(story.theme, pageWidth / 2, 52, { align: "center" });
+
+      // Cover illustration (first page image)
+      const coverImgUrl = pages[0]?.image_url;
+      if (coverImgUrl) {
+        try {
+          const coverImg = await loadImage(coverImgUrl);
+          const imgSize = 120;
+          const imgX = (pageWidth - imgSize) / 2;
+          const imgY = 65;
+          // White background with rounded border effect
+          pdf.setDrawColor(244, 180, 196);
+          pdf.setLineWidth(1.5);
+          pdf.roundedRect(imgX - 3, imgY - 3, imgSize + 6, imgSize + 6, 5, 5, "S");
+          const canvas = document.createElement("canvas");
+          canvas.width = coverImg.naturalWidth;
+          canvas.height = coverImg.naturalHeight;
+          const ctx = canvas.getContext("2d");
+          if (ctx) {
+            ctx.fillStyle = "#ffffff";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(coverImg, 0, 0);
+            pdf.addImage(canvas.toDataURL("image/jpeg", 0.9), "JPEG", imgX, imgY, imgSize, imgSize);
+          }
+        } catch {
+          // skip cover image
+        }
+      }
+
+      // Share link
+      pdf.setFontSize(11);
+      pdf.setFont("helvetica", "normal");
+      pdf.setTextColor(100, 100, 100);
+      pdf.text("Lee este cuento aquí:", pageWidth / 2, 200, { align: "center" });
+      pdf.setFontSize(10);
+      pdf.setTextColor(180, 60, 100);
+      pdf.textWithLink(coverShareUrl, pageWidth / 2 - pdf.getTextWidth(coverShareUrl) / 2, 208, { url: coverShareUrl });
+
+      // Branding
+      pdf.setFontSize(10);
+      pdf.setTextColor(150, 150, 150);
+      pdf.text("Colección de cuentos por", pageWidth / 2, 240, { align: "center" });
+      pdf.setFontSize(13);
+      pdf.setFont("helvetica", "bold");
+      pdf.setTextColor(180, 60, 100);
+      pdf.text("Soluciones Digitales Caimán", pageWidth / 2, 248, { align: "center" });
+
+      // Bottom band
+      pdf.setFillColor(180, 230, 210);
+      pdf.rect(0, pageHeight - 12, pageWidth, 4, "F");
+      pdf.setFillColor(244, 180, 196);
+      pdf.rect(0, pageHeight - 8, pageWidth, 8, "F");
+
+      // === STORY PAGES ===
       for (let i = 0; i < pages.length; i++) {
-        if (i > 0) pdf.addPage();
+        pdf.addPage();
 
         const page = pages[i];
-
-        // Title on first page
-        if (i === 0) {
-          pdf.setFontSize(22);
-          pdf.setFont("helvetica", "bold");
-          pdf.text(story.title, pageWidth / 2, margin + 10, { align: "center" });
-          pdf.setFontSize(12);
-          pdf.setFont("helvetica", "normal");
-        }
 
         // Page number
         pdf.setFontSize(10);
@@ -192,7 +256,7 @@ const StoryViewer = () => {
         pdf.setTextColor(0);
 
         // Narrative text
-        const textY = i === 0 ? margin + 20 : margin;
+        const textY = margin;
         pdf.setFontSize(14);
         pdf.setFont("helvetica", "normal");
         const splitText = pdf.splitTextToSize(page.narrative_text, contentWidth);
@@ -277,9 +341,15 @@ const StoryViewer = () => {
     }
   }, [story, pages, drawings, toast]);
 
-  const currentPageData = pages[currentPage];
+  // Page 0 is the cover, pages 1..N map to story pages
+  const isCoverPage = currentPage === 0;
+  const storyPageIndex = currentPage - 1;
+  const currentPageData = isCoverPage ? null : pages[storyPageIndex];
+  const totalPagesWithCover = pages.length + 1;
   const isFirstPage = currentPage === 0;
-  const isLastPage = currentPage === pages.length - 1;
+  const isLastPage = currentPage === totalPagesWithCover - 1;
+
+  const shareUrl = `${window.location.origin}/cuento/${shareCode}`;
 
   if (loading) {
     return (
@@ -320,66 +390,79 @@ const StoryViewer = () => {
         </h1>
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <span className="font-medium">
-            {currentPage + 1} / {pages.length}
+            {currentPage === 0 ? "Portada" : `${storyPageIndex + 1} / ${pages.length}`}
           </span>
         </div>
       </header>
 
       {/* Main content */}
       <main className="flex-1 flex flex-col lg:flex-row overflow-hidden">
-        {/* Text section */}
-        <div className="lg:w-1/3 p-4 lg:p-6 flex flex-col gap-3 bg-card/50">
-          <Card className="p-4 md:p-6 bg-card flex-1 overflow-auto">
-            <p className="text-lg md:text-xl lg:text-2xl leading-relaxed font-medium">
-              {currentPageData?.narrative_text}
-            </p>
-          </Card>
-
-          {/* Audio + PDF buttons */}
-          <div className="flex gap-2">
-            <Button
-              onClick={handleSpeak}
-              variant={isSpeaking ? "secondary" : "default"}
-              className="flex-1 h-14 text-lg rounded-xl touch-friendly"
-            >
-              {isSpeaking ? (
-                <>
-                  <VolumeX className="mr-2 h-6 w-6" />
-                  Detener
-                </>
-              ) : (
-                <>
-                  <Volume2 className="mr-2 h-6 w-6" />
-                  Escuchar
-                </>
-              )}
-            </Button>
-            <Button
-              onClick={handleDownloadPdf}
-              disabled={generatingPdf}
-              variant="outline"
-              className="h-14 px-4 text-lg rounded-xl touch-friendly border-primary text-primary hover:bg-primary hover:text-primary-foreground"
-            >
-              {generatingPdf ? (
-                <Loader2 className="mr-2 h-6 w-6 animate-spin" />
-              ) : (
-                <Download className="mr-2 h-6 w-6" />
-              )}
-              <span className="hidden sm:inline">Descargar mi Cuento</span>
-              <span className="sm:hidden">PDF</span>
-            </Button>
+        {isCoverPage ? (
+          <div className="flex-1 overflow-auto">
+            <StoryCover
+              title={story.title}
+              theme={story.theme}
+              imageUrl={pages[0]?.image_url || null}
+              shareUrl={shareUrl}
+            />
           </div>
-        </div>
+        ) : (
+          <>
+            {/* Text section */}
+            <div className="lg:w-1/3 p-4 lg:p-6 flex flex-col gap-3 bg-card/50">
+              <Card className="p-4 md:p-6 bg-card flex-1 overflow-auto">
+                <p className="text-lg md:text-xl lg:text-2xl leading-relaxed font-medium">
+                  {currentPageData?.narrative_text}
+                </p>
+              </Card>
 
-        {/* Coloring section */}
-        <div className="flex-1 p-4 lg:p-6 flex flex-col min-h-[50vh] lg:min-h-0">
-          <ColoringCanvas
-            imageUrl={currentPageData?.image_url || null}
-            pageId={currentPageData?.id || ""}
-            onSave={handleSaveDrawing}
-            initialDrawing={drawings[currentPageData?.id || ""]}
-          />
-        </div>
+              {/* Audio + PDF buttons */}
+              <div className="flex gap-2">
+                <Button
+                  onClick={handleSpeak}
+                  variant={isSpeaking ? "secondary" : "default"}
+                  className="flex-1 h-14 text-lg rounded-xl touch-friendly"
+                >
+                  {isSpeaking ? (
+                    <>
+                      <VolumeX className="mr-2 h-6 w-6" />
+                      Detener
+                    </>
+                  ) : (
+                    <>
+                      <Volume2 className="mr-2 h-6 w-6" />
+                      Escuchar
+                    </>
+                  )}
+                </Button>
+                <Button
+                  onClick={handleDownloadPdf}
+                  disabled={generatingPdf}
+                  variant="outline"
+                  className="h-14 px-4 text-lg rounded-xl touch-friendly border-primary text-primary hover:bg-primary hover:text-primary-foreground"
+                >
+                  {generatingPdf ? (
+                    <Loader2 className="mr-2 h-6 w-6 animate-spin" />
+                  ) : (
+                    <Download className="mr-2 h-6 w-6" />
+                  )}
+                  <span className="hidden sm:inline">Descargar mi Cuento</span>
+                  <span className="sm:hidden">PDF</span>
+                </Button>
+              </div>
+            </div>
+
+            {/* Coloring section */}
+            <div className="flex-1 p-4 lg:p-6 flex flex-col min-h-[50vh] lg:min-h-0">
+              <ColoringCanvas
+                imageUrl={currentPageData?.image_url || null}
+                pageId={currentPageData?.id || ""}
+                onSave={handleSaveDrawing}
+                initialDrawing={drawings[currentPageData?.id || ""]}
+              />
+            </div>
+          </>
+        )}
       </main>
 
       {/* Navigation footer */}
@@ -395,7 +478,7 @@ const StoryViewer = () => {
         </Button>
 
         <div className="flex gap-2 overflow-x-auto py-2 px-1">
-          {pages.map((_, idx) => (
+          {Array.from({ length: totalPagesWithCover }).map((_, idx) => (
             <button
               key={idx}
               onClick={() => goToPage(idx)}
