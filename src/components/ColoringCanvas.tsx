@@ -1,7 +1,7 @@
 import { useRef, useEffect, useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
-import { Eraser, Undo, Trash2 } from "lucide-react";
+import { Eraser, Undo, Trash2, PaintBucket } from "lucide-react";
 
 interface ColoringCanvasProps {
   imageUrl: string | null;
@@ -33,10 +33,90 @@ const ColoringCanvas = ({
   const [selectedColor, setSelectedColor] = useState(COLORS[0].value);
   const [brushSize, setBrushSize] = useState(8);
   const [isEraser, setIsEraser] = useState(false);
+  const [isFillMode, setIsFillMode] = useState(false);
   const [history, setHistory] = useState<ImageData[]>([]);
   const [showBrush, setShowBrush] = useState(true);
   const [cursorPos, setCursorPos] = useState({ x: 0, y: 0 });
   const lastPos = useRef<{ x: number; y: number } | null>(null);
+
+  const saveToHistory = useCallback(() => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx) return;
+
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    setHistory((prev) => [...prev.slice(-10), imageData]);
+  }, []);
+
+  const hexToRgb = (hex: string) => {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return { r, g, b };
+  };
+
+  const floodFill = useCallback((startX: number, startY: number) => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx) return;
+
+    saveToHistory();
+
+    const dpr = window.devicePixelRatio || 1;
+    const px = Math.floor(startX * dpr);
+    const py = Math.floor(startY * dpr);
+    const w = canvas.width;
+    const h = canvas.height;
+    const imageData = ctx.getImageData(0, 0, w, h);
+    const data = imageData.data;
+
+    const idx = (py * w + px) * 4;
+    const startR = data[idx], startG = data[idx + 1], startB = data[idx + 2], startA = data[idx + 3];
+
+    const fill = hexToRgb(selectedColor);
+    const fillAlpha = 115; // ~45% opacity
+
+    if (startR === fill.r && startG === fill.g && startB === fill.b && startA === fillAlpha) return;
+
+    const tolerance = 60;
+    const match = (i: number) => {
+      const dr = Math.abs(data[i] - startR);
+      const dg = Math.abs(data[i + 1] - startG);
+      const db = Math.abs(data[i + 2] - startB);
+      const da = Math.abs(data[i + 3] - startA);
+      return dr + dg + db + da < tolerance;
+    };
+
+    const stack = [px, py];
+    const visited = new Uint8Array(w * h);
+
+    while (stack.length > 0) {
+      const cy = stack.pop()!;
+      const cx = stack.pop()!;
+      const ci = cy * w + cx;
+
+      if (cx < 0 || cx >= w || cy < 0 || cy >= h) continue;
+      if (visited[ci]) continue;
+      visited[ci] = 1;
+
+      const pi = ci * 4;
+      if (!match(pi)) continue;
+
+      data[pi] = fill.r;
+      data[pi + 1] = fill.g;
+      data[pi + 2] = fill.b;
+      data[pi + 3] = fillAlpha;
+
+      stack.push(cx + 1, cy);
+      stack.push(cx - 1, cy);
+      stack.push(cx, cy + 1);
+      stack.push(cx, cy - 1);
+    }
+
+    ctx.putImageData(imageData, 0, 0);
+    const drawingData = canvas.toDataURL("image/png");
+    onSave(drawingData);
+  }, [selectedColor, onSave, saveToHistory]);
 
   // Initialize canvas
   useEffect(() => {
@@ -96,26 +176,24 @@ const ColoringCanvas = ({
     };
   }, []);
 
-  const saveToHistory = useCallback(() => {
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext("2d");
-    if (!canvas || !ctx) return;
-
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    setHistory((prev) => [...prev.slice(-10), imageData]);
-  }, []);
 
   const startDrawing = useCallback(
     (e: React.TouchEvent | React.MouseEvent) => {
       e.preventDefault();
+      const pos = getCanvasCoords(e);
+      setCursorPos(pos);
+
+      if (isFillMode) {
+        floodFill(pos.x, pos.y);
+        return;
+      }
+
       saveToHistory();
       setIsDrawing(true);
       setShowBrush(false);
-      const pos = getCanvasCoords(e);
       lastPos.current = pos;
-      setCursorPos(pos);
     },
-    [getCanvasCoords, saveToHistory]
+    [getCanvasCoords, saveToHistory, isFillMode, floodFill]
   );
 
   const draw = useCallback(
@@ -204,9 +282,18 @@ const ColoringCanvas = ({
           />
         ))}
         <Button
+          variant={isFillMode ? "default" : "outline"}
+          size="icon"
+          onClick={() => { setIsFillMode(!isFillMode); setIsEraser(false); }}
+          className="w-10 h-10 rounded-full touch-friendly"
+          title="Rellenar zona"
+        >
+          <PaintBucket className="h-5 w-5" />
+        </Button>
+        <Button
           variant={isEraser ? "default" : "outline"}
           size="icon"
-          onClick={() => setIsEraser(!isEraser)}
+          onClick={() => { setIsEraser(!isEraser); setIsFillMode(false); }}
           className="w-10 h-10 rounded-full touch-friendly"
         >
           <Eraser className="h-5 w-5" />
