@@ -101,8 +101,9 @@ const StoryViewer = () => {
   // Save drawing to localStorage
   const handleSaveDrawing = useCallback(
     (drawingData: string) => {
-      const page = pages[currentPage];
-      if (!page || !story) return;
+      const pageIdx = currentPage - 1;
+      const page = pages[pageIdx];
+      if (!page || !story || pageIdx < 0) return;
 
       setDrawings((prev) => ({ ...prev, [page.id]: drawingData }));
 
@@ -117,8 +118,9 @@ const StoryViewer = () => {
 
   // Text-to-speech - using ref to avoid re-render issues
   const handleSpeak = useCallback(() => {
-    const page = pages[currentPage];
-    if (!page) return;
+    const pageIdx = currentPage - 1;
+    const page = pages[pageIdx];
+    if (!page || pageIdx < 0) return;
 
     if (speakingRef.current) {
       window.speechSynthesis.cancel();
@@ -455,6 +457,7 @@ const StoryViewer = () => {
             {/* Coloring section */}
             <div className="flex-1 p-4 lg:p-6 flex flex-col min-h-[50vh] lg:min-h-0">
               <ColoringCanvas
+                key={currentPageData?.id || storyPageIndex}
                 imageUrl={currentPageData?.image_url || null}
                 pageId={currentPageData?.id || ""}
                 onSave={handleSaveDrawing}

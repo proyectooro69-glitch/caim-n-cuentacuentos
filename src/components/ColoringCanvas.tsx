@@ -11,14 +11,14 @@ interface ColoringCanvasProps {
 }
 
 const COLORS = [
-  { name: "Rojo", value: "#FF6B6B" },
-  { name: "Naranja", value: "#FFA94D" },
-  { name: "Amarillo", value: "#FFE066" },
-  { name: "Verde", value: "#69DB7C" },
-  { name: "Azul", value: "#74C0FC" },
-  { name: "Morado", value: "#DA77F2" },
-  { name: "Rosa", value: "#FAA2C1" },
-  { name: "Café", value: "#A0522D" },
+  { name: "Rojo", value: "#FFB3B3" },
+  { name: "Naranja", value: "#FFCC99" },
+  { name: "Amarillo", value: "#FFF2AA" },
+  { name: "Verde", value: "#A8E6B4" },
+  { name: "Azul", value: "#A8D8FF" },
+  { name: "Morado", value: "#E6B3FF" },
+  { name: "Rosa", value: "#FFCCE0" },
+  { name: "Café", value: "#C89B7B" },
 ];
 
 const ColoringCanvas = ({
