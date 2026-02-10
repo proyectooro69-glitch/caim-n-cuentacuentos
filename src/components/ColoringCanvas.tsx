@@ -31,7 +31,7 @@ const ColoringCanvas = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [selectedColor, setSelectedColor] = useState(COLORS[0].value);
-  const [brushSize, setBrushSize] = useState(20);
+  const [brushSize, setBrushSize] = useState(8);
   const [isEraser, setIsEraser] = useState(false);
   const [history, setHistory] = useState<ImageData[]>([]);
   const [showBrush, setShowBrush] = useState(true);
@@ -133,11 +133,13 @@ const ColoringCanvas = ({
       ctx.globalCompositeOperation = isEraser ? "destination-out" : "multiply";
       ctx.strokeStyle = selectedColor;
       ctx.lineWidth = brushSize;
+      ctx.globalAlpha = isEraser ? 1.0 : 0.45;
 
       ctx.beginPath();
       ctx.moveTo(lastPos.current.x, lastPos.current.y);
       ctx.lineTo(pos.x, pos.y);
       ctx.stroke();
+      ctx.globalAlpha = 1.0;
 
       lastPos.current = pos;
     },
@@ -217,9 +219,9 @@ const ColoringCanvas = ({
         <Slider
           value={[brushSize]}
           onValueChange={(v) => setBrushSize(v[0])}
-          min={5}
-          max={50}
-          step={5}
+          min={3}
+          max={30}
+          step={1}
           className="flex-1"
         />
         <div
