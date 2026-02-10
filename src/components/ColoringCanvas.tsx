@@ -29,6 +29,7 @@ const ColoringCanvas = ({
 }: ColoringCanvasProps) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const bgImageDataRef = useRef<ImageData | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [selectedColor, setSelectedColor] = useState(COLORS[0].value);
   const [brushSize, setBrushSize] = useState(8);
@@ -43,7 +44,6 @@ const ColoringCanvas = ({
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx) return;
-
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     setHistory((prev) => [...prev.slice(-10), imageData]);
   }, []);
@@ -54,6 +54,53 @@ const ColoringCanvas = ({
     const b = parseInt(hex.slice(5, 7), 16);
     return { r, g, b };
   };
+
+  // Load background image pixel data for flood fill boundary detection
+  useEffect(() => {
+    if (!imageUrl) {
+      bgImageDataRef.current = null;
+      return;
+    }
+
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      const tempCanvas = document.createElement("canvas");
+      tempCanvas.width = canvas.width;
+      tempCanvas.height = canvas.height;
+      const tempCtx = tempCanvas.getContext("2d");
+      if (!tempCtx) return;
+
+      // Draw image filling the canvas to match the displayed image
+      tempCtx.fillStyle = "#ffffff";
+      tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+
+      // Calculate object-contain dimensions
+      const containerW = tempCanvas.width;
+      const containerH = tempCanvas.height;
+      const imgRatio = img.naturalWidth / img.naturalHeight;
+      const containerRatio = containerW / containerH;
+      let drawW: number, drawH: number, drawX: number, drawY: number;
+      if (imgRatio > containerRatio) {
+        drawW = containerW;
+        drawH = containerW / imgRatio;
+        drawX = 0;
+        drawY = (containerH - drawH) / 2;
+      } else {
+        drawH = containerH;
+        drawW = containerH * imgRatio;
+        drawX = (containerW - drawW) / 2;
+        drawY = 0;
+      }
+      tempCtx.drawImage(img, drawX, drawY, drawW, drawH);
+
+      bgImageDataRef.current = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+    };
+    img.src = imageUrl;
+  }, [imageUrl]);
 
   const floodFill = useCallback((startX: number, startY: number) => {
     const canvas = canvasRef.current;
@@ -67,24 +114,63 @@ const ColoringCanvas = ({
     const py = Math.floor(startY * dpr);
     const w = canvas.width;
     const h = canvas.height;
-    const imageData = ctx.getImageData(0, 0, w, h);
-    const data = imageData.data;
 
-    const idx = (py * w + px) * 4;
-    const startR = data[idx], startG = data[idx + 1], startB = data[idx + 2], startA = data[idx + 3];
+    if (px < 0 || px >= w || py < 0 || py >= h) return;
+
+    const drawingData = ctx.getImageData(0, 0, w, h);
+    const dData = drawingData.data;
+    const bgData = bgImageDataRef.current?.data;
 
     const fill = hexToRgb(selectedColor);
     const fillAlpha = 115; // ~45% opacity
 
-    if (startR === fill.r && startG === fill.g && startB === fill.b && startA === fillAlpha) return;
+    // Check if a pixel is a dark border in the background image
+    const isBorderPixel = (i: number): boolean => {
+      if (!bgData) return false;
+      const r = bgData[i], g = bgData[i + 1], b = bgData[i + 2];
+      // Dark pixel = border line (threshold: brightness < 80)
+      return (r + g + b) / 3 < 80;
+    };
 
-    const tolerance = 60;
-    const match = (i: number) => {
-      const dr = Math.abs(data[i] - startR);
-      const dg = Math.abs(data[i + 1] - startG);
-      const db = Math.abs(data[i + 2] - startB);
-      const da = Math.abs(data[i + 3] - startA);
-      return dr + dg + db + da < tolerance;
+    // Check if the drawing canvas pixel at this position is already filled with our color
+    const isAlreadyFilled = (i: number): boolean => {
+      return dData[i] === fill.r && dData[i + 1] === fill.g && dData[i + 2] === fill.b && dData[i + 3] === fillAlpha;
+    };
+
+    // Check if a pixel on the drawing canvas is "empty" (transparent or very light)
+    const isEmptyPixel = (i: number): boolean => {
+      return dData[i + 3] < 30; // mostly transparent = unfilled
+    };
+
+    const startIdx = (py * w + px) * 4;
+
+    // Don't fill if clicking on a border
+    if (isBorderPixel(startIdx)) return;
+    // Don't fill if already this color
+    if (isAlreadyFilled(startIdx)) return;
+
+    // Determine what we're replacing: check the starting pixel
+    const startR = dData[startIdx], startG = dData[startIdx + 1], startB = dData[startIdx + 2], startA = dData[startIdx + 3];
+    const startIsEmpty = startA < 30;
+
+    const canFill = (i: number): boolean => {
+      // Stop at borders in the background image
+      if (isBorderPixel(i)) return false;
+      // Stop if already filled with target color
+      if (isAlreadyFilled(i)) return false;
+
+      if (startIsEmpty) {
+        // We're filling an empty area - only fill empty pixels
+        return isEmptyPixel(i);
+      } else {
+        // We're replacing an existing color - match similar pixels
+        const tolerance = 60;
+        const dr = Math.abs(dData[i] - startR);
+        const dg = Math.abs(dData[i + 1] - startG);
+        const db = Math.abs(dData[i + 2] - startB);
+        const da = Math.abs(dData[i + 3] - startA);
+        return dr + dg + db + da < tolerance;
+      }
     };
 
     const stack = [px, py];
@@ -93,19 +179,20 @@ const ColoringCanvas = ({
     while (stack.length > 0) {
       const cy = stack.pop()!;
       const cx = stack.pop()!;
-      const ci = cy * w + cx;
 
       if (cx < 0 || cx >= w || cy < 0 || cy >= h) continue;
+
+      const ci = cy * w + cx;
       if (visited[ci]) continue;
       visited[ci] = 1;
 
       const pi = ci * 4;
-      if (!match(pi)) continue;
+      if (!canFill(pi)) continue;
 
-      data[pi] = fill.r;
-      data[pi + 1] = fill.g;
-      data[pi + 2] = fill.b;
-      data[pi + 3] = fillAlpha;
+      dData[pi] = fill.r;
+      dData[pi + 1] = fill.g;
+      dData[pi + 2] = fill.b;
+      dData[pi + 3] = fillAlpha;
 
       stack.push(cx + 1, cy);
       stack.push(cx - 1, cy);
@@ -113,9 +200,9 @@ const ColoringCanvas = ({
       stack.push(cx, cy - 1);
     }
 
-    ctx.putImageData(imageData, 0, 0);
-    const drawingData = canvas.toDataURL("image/png");
-    onSave(drawingData);
+    ctx.putImageData(drawingData, 0, 0);
+    const result = canvas.toDataURL("image/png");
+    onSave(result);
   }, [selectedColor, onSave, saveToHistory]);
 
   // Initialize canvas
@@ -140,7 +227,6 @@ const ColoringCanvas = ({
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
 
-      // Restore drawing after resize
       if (initialDrawing) {
         const img = new Image();
         img.onload = () => {
@@ -175,7 +261,6 @@ const ColoringCanvas = ({
       y: clientY - rect.top,
     };
   }, []);
-
 
   const startDrawing = useCallback(
     (e: React.TouchEvent | React.MouseEvent) => {
@@ -230,7 +315,6 @@ const ColoringCanvas = ({
       setShowBrush(true);
       lastPos.current = null;
 
-      // Save drawing
       const canvas = canvasRef.current;
       if (canvas) {
         const drawingData = canvas.toDataURL("image/png");
@@ -241,11 +325,9 @@ const ColoringCanvas = ({
 
   const handleUndo = () => {
     if (history.length === 0) return;
-
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx) return;
-
     const lastState = history[history.length - 1];
     ctx.putImageData(lastState, 0, 0);
     setHistory((prev) => prev.slice(0, -1));
@@ -256,7 +338,6 @@ const ColoringCanvas = ({
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx) return;
-
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     onSave("");
   };
@@ -322,7 +403,6 @@ const ColoringCanvas = ({
         ref={containerRef}
         className="relative flex-1 bg-white rounded-xl overflow-hidden border-2 border-border shadow-inner"
       >
-        {/* Background image */}
         {imageUrl && (
           <img
             src={imageUrl}
@@ -332,7 +412,6 @@ const ColoringCanvas = ({
           />
         )}
 
-        {/* Drawing canvas */}
         <canvas
           ref={canvasRef}
           className="absolute inset-0 coloring-canvas"
@@ -346,7 +425,6 @@ const ColoringCanvas = ({
           onTouchEnd={stopDrawing}
         />
 
-        {/* Brush cursor indicator */}
         {showBrush && !isDrawing && (
           <div
             className="pointer-events-none absolute transition-all duration-75"

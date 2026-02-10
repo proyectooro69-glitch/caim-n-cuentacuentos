@@ -122,8 +122,10 @@ const StoryViewer = () => {
     const page = pages[pageIdx];
     if (!page || pageIdx < 0) return;
 
+    // Always cancel any ongoing speech first
+    window.speechSynthesis.cancel();
+
     if (speakingRef.current) {
-      window.speechSynthesis.cancel();
       speakingRef.current = false;
       setIsSpeaking(false);
       return;
@@ -135,18 +137,30 @@ const StoryViewer = () => {
       utterance.rate = 0.9;
       utterance.pitch = 1.1;
 
+      // Try to find a Spanish voice
+      const voices = window.speechSynthesis.getVoices();
+      const spanishVoice = voices.find(v => v.lang.startsWith("es"));
+      if (spanishVoice) {
+        utterance.voice = spanishVoice;
+      }
+
       utterance.onend = () => {
         speakingRef.current = false;
         setIsSpeaking(false);
       };
-      utterance.onerror = () => {
+      utterance.onerror = (e) => {
+        console.error("SpeechSynthesis error:", e);
         speakingRef.current = false;
         setIsSpeaking(false);
       };
 
       speakingRef.current = true;
       setIsSpeaking(true);
-      window.speechSynthesis.speak(utterance);
+
+      // Small delay to ensure cancel() completed
+      setTimeout(() => {
+        window.speechSynthesis.speak(utterance);
+      }, 50);
     } catch (error) {
       console.error("SpeechSynthesis error:", error);
       speakingRef.current = false;
