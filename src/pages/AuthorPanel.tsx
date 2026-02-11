@@ -37,7 +37,19 @@ const AuthorPanel = () => {
         body: { theme },
       });
 
-      if (error) throw error;
+      if (error) {
+        // Try to extract the real error message from the response
+        const context = (error as any)?.context;
+        if (context && typeof context.json === 'function') {
+          try {
+            const body = await context.json();
+            throw new Error(body.error || error.message);
+          } catch (e) {
+            if (e instanceof Error && e.message !== error.message) throw e;
+          }
+        }
+        throw error;
+      }
 
       if (data.success) {
         setGeneratedStory(data.story);

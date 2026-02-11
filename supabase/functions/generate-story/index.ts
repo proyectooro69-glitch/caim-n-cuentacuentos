@@ -69,6 +69,18 @@ Cada página debe tener:
     if (!storyResponse.ok) {
       const errorText = await storyResponse.text();
       console.error("Story generation error:", errorText);
+      if (storyResponse.status === 402) {
+        return new Response(
+          JSON.stringify({ error: "No hay suficientes créditos de IA. Por favor, agrega créditos en Settings → Workspace → Usage." }),
+          { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      if (storyResponse.status === 429) {
+        return new Response(
+          JSON.stringify({ error: "Demasiadas solicitudes. Espera un momento e intenta de nuevo." }),
+          { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
       throw new Error("Failed to generate story");
     }
 
