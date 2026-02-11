@@ -118,10 +118,10 @@ Cada página debe tener:
       throw new Error("Failed to parse story content");
     }
 
-    // Step 2: Create story in database
+    // Step 2: Create story in database (cover_image_url added after generation)
     const { data: storyRecord, error: storyError } = await supabase
       .from("stories")
-      .insert({ theme, title: story.title })
+      .insert({ theme, title: story.title } as any)
       .select()
       .single();
 
@@ -178,6 +178,14 @@ Scene: ${story.pages[0].imagePrompt}`;
       }
     } catch (e) {
       console.error("Cover generation error:", e);
+    }
+
+    // Save cover URL to story record
+    if (coverImageUrl) {
+      await supabase
+        .from("stories")
+        .update({ cover_image_url: coverImageUrl } as any)
+        .eq("id", storyRecord.id);
     }
 
     // Step 4: Generate B&W coloring images for each page

@@ -51,6 +51,7 @@ export type Database = {
       }
       stories: {
         Row: {
+          cover_image_url: string | null
           created_at: string
           id: string
           share_code: string
@@ -59,6 +60,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          cover_image_url?: string | null
           created_at?: string
           id?: string
           share_code?: string
@@ -67,6 +69,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          cover_image_url?: string | null
           created_at?: string
           id?: string
           share_code?: string
