@@ -4,10 +4,20 @@ interface StoryCoverProps {
   title: string;
   theme: string;
   imageUrl: string | null;
+  coverImageUrl?: string | null;
   shareUrl: string;
+  lang?: "es" | "en";
 }
 
-const StoryCover = ({ title, theme, imageUrl, shareUrl }: StoryCoverProps) => {
+const StoryCover = ({ title, theme, imageUrl, coverImageUrl, shareUrl, lang = "es" }: StoryCoverProps) => {
+  const tapText = lang === "es"
+    ? "Toca para escuchar y colorear este cuento"
+    : "Tap to listen and color this story";
+
+  const collectionText = lang === "es"
+    ? "Colección de cuentos por"
+    : "Story collection by";
+
   return (
     <div className="flex flex-col items-center justify-center min-h-[70vh] p-6 gap-6">
       {/* Cover card */}
@@ -26,12 +36,12 @@ const StoryCover = ({ title, theme, imageUrl, shareUrl }: StoryCoverProps) => {
           <p className="mt-1 text-sm text-muted-foreground italic">{theme}</p>
         </div>
 
-        {/* Illustration */}
+        {/* Illustration — prefer color cover, fallback to B&W */}
         <div className="px-6 py-4 flex justify-center">
           <div className="w-full max-w-xs aspect-square rounded-2xl border-2 border-primary/20 bg-white overflow-hidden flex items-center justify-center shadow-inner">
-            {imageUrl ? (
+            {(coverImageUrl || imageUrl) ? (
               <img
-                src={imageUrl}
+                src={coverImageUrl || imageUrl || ""}
                 alt={`Portada de ${title}`}
                 className="w-full h-full object-contain"
                 crossOrigin="anonymous"
@@ -42,9 +52,18 @@ const StoryCover = ({ title, theme, imageUrl, shareUrl }: StoryCoverProps) => {
           </div>
         </div>
 
+        {/* Instruction note */}
+        <div className="px-6 pb-2 text-center">
+          <p className="text-sm font-medium text-primary/80 italic">
+            ✨ {tapText} ✨
+          </p>
+        </div>
+
         {/* Share link */}
         <div className="px-6 pb-4 text-center">
-          <p className="text-xs text-muted-foreground mb-1">Lee este cuento aquí:</p>
+          <p className="text-xs text-muted-foreground mb-1">
+            {lang === "es" ? "Lee este cuento aquí:" : "Read this story here:"}
+          </p>
           <a
             href={shareUrl}
             target="_blank"
@@ -61,7 +80,7 @@ const StoryCover = ({ title, theme, imageUrl, shareUrl }: StoryCoverProps) => {
 
       {/* Branding */}
       <p className="text-xs text-muted-foreground text-center">
-        Colección de cuentos por <span className="font-bold">Soluciones Digitales Caimán</span>
+        {collectionText} <span className="font-bold">Soluciones Digitales Caimán</span>
       </p>
     </div>
   );
