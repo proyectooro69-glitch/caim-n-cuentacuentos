@@ -4,7 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Loader2, Sparkles, Book, Share2, Copy, Check } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { supabase } from "@/integrations/supabase/client";
+import { generateStory } from "@/lib/storyGenerator";
 import LanguageSelector from "@/components/LanguageSelector";
 
 interface GeneratedStory {
@@ -17,6 +17,7 @@ const AuthorPanel = () => {
   const [theme, setTheme] = useState("");
   const [lang, setLang] = useState<"es" | "en">("es");
   const [isGenerating, setIsGenerating] = useState(false);
+  const [progressMsg, setProgressMsg] = useState("");
   const [generatedStory, setGeneratedStory] = useState<GeneratedStory | null>(null);
   const [copied, setCopied] = useState(false);
   const { toast } = useToast();
@@ -80,31 +81,12 @@ const AuthorPanel = () => {
 
     setIsGenerating(true);
     setGeneratedStory(null);
+    setProgressMsg("");
 
     try {
-      const { data, error } = await supabase.functions.invoke("generate-story", {
-        body: { theme, lang },
-      });
-
-      if (error) {
-        const context = (error as any)?.context;
-        if (context && typeof context.json === "function") {
-          try {
-            const body = await context.json();
-            throw new Error(body.error || error.message);
-          } catch (e) {
-            if (e instanceof Error && e.message !== error.message) throw e;
-          }
-        }
-        throw error;
-      }
-
-      if (data.success) {
-        setGeneratedStory(data.story);
-        toast({ title: i.storyReady, description: `"${data.story.title}"` });
-      } else {
-        throw new Error(data.error || "Unknown error");
-      }
+      const result = await generateStory(theme, lang, (msg) => setProgressMsg(msg));
+      setGeneratedStory(result);
+      toast({ title: i.storyReady, description: `"${result.title}"` });
     } catch (error) {
       console.error("Error generating story:", error);
       toast({
@@ -114,6 +96,7 @@ const AuthorPanel = () => {
       });
     } finally {
       setIsGenerating(false);
+      setProgressMsg("");
     }
   };
 
@@ -188,7 +171,7 @@ const AuthorPanel = () => {
 
             {isGenerating && (
               <div className="text-center text-muted-foreground animate-pulse">
-                <p>{i.generatingHint}</p>
+                <p>{progressMsg || i.generatingHint}</p>
                 <p className="text-sm">{i.generatingHint2}</p>
               </div>
             )}
