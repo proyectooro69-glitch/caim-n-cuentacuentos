@@ -13,19 +13,18 @@ serve(async (req) => {
 
   try {
     const { theme, lang = "es" } = await req.json();
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+    const GEMINI_API_KEY = Deno.env.get("GOOGLE_GEMINI_API_KEY");
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
-    if (!LOVABLE_API_KEY) {
-      throw new Error("LOVABLE_API_KEY is not configured");
+    if (!GEMINI_API_KEY) {
+      throw new Error("GOOGLE_GEMINI_API_KEY is not configured");
     }
 
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-
     const isEnglish = lang === "en";
 
-    // Step 1: Generate story text
+    // Step 1: Generate story text using Google Gemini API directly
     console.log("Generating story for theme:", theme, "lang:", lang);
 
     const systemPrompt = isEnglish
@@ -72,41 +71,33 @@ Cada página debe tener:
       ? `Create a 5-page story about: ${theme}`
       : `Crea un cuento de 5 páginas sobre: ${theme}`;
 
-    const storyResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
+
+    const storyResponse = await fetch(geminiUrl, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
+        contents: [
+          { role: "user", parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] },
         ],
+        generationConfig: {
+          temperature: 0.9,
+          maxOutputTokens: 4096,
+        },
       }),
     });
 
     if (!storyResponse.ok) {
       const errorText = await storyResponse.text();
-      console.error("Story generation error:", errorText);
-      if (storyResponse.status === 402) {
-        return new Response(
-          JSON.stringify({ error: isEnglish ? "Not enough AI credits." : "No hay suficientes créditos de IA." }),
-          { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-      if (storyResponse.status === 429) {
-        return new Response(
-          JSON.stringify({ error: isEnglish ? "Too many requests. Please wait." : "Demasiadas solicitudes. Espera un momento." }),
-          { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-      throw new Error("Failed to generate story");
+      console.error("Gemini API error:", errorText);
+      throw new Error("Failed to generate story text");
     }
 
     const storyData = await storyResponse.json();
-    let storyContent = storyData.choices?.[0]?.message?.content;
+    let storyContent = storyData.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!storyContent) {
+      throw new Error("No content returned from Gemini");
+    }
     storyContent = storyContent.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
     console.log("Story content:", storyContent);
 
@@ -118,7 +109,7 @@ Cada página debe tener:
       throw new Error("Failed to parse story content");
     }
 
-    // Step 2: Create story in database (cover_image_url added after generation)
+    // Step 2: Create story in database
     const { data: storyRecord, error: storyError } = await supabase
       .from("stories")
       .insert({ theme, title: story.title } as any)
@@ -130,57 +121,33 @@ Cada página debe tener:
       throw new Error("Failed to save story");
     }
 
-    // Step 3: Generate COLORFUL COVER image
-    console.log("Generating colorful cover image...");
+    // Step 3: Generate colorful cover using Pollinations.ai
+    console.log("Generating colorful cover image via Pollinations.ai...");
     let coverImageUrl = null;
 
     try {
-      const coverPrompt = `Create a vibrant, colorful children's book cover illustration for ages 3-7.
+      const coverPrompt = encodeURIComponent(
+        `Vibrant colorful children's book cover illustration for ages 3-7, cute expressive main character, soft pastel and bright cheerful tones, professional children's book style, friendly inviting atmosphere, no text or words, soft gradients warm lighting. Scene: ${story.pages[0].imagePrompt}`
+      );
+      const pollinationsCoverUrl = `https://image.pollinations.ai/prompt/${coverPrompt}?width=768&height=1024&nologo=true&seed=${Date.now()}`;
 
-Style requirements:
-- Full color, soft pastel and bright cheerful tones
-- Cute, expressive main character in the center
-- Clean, professional children's book illustration style
-- Friendly and inviting atmosphere
-- No text or words in the image
-- Soft gradients and warm lighting
-
-Scene: ${story.pages[0].imagePrompt}`;
-
-      const coverResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${LOVABLE_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "google/gemini-2.5-flash-image",
-          messages: [{ role: "user", content: coverPrompt }],
-          modalities: ["image", "text"],
-        }),
-      });
-
-      if (coverResponse.ok) {
-        const coverData = await coverResponse.json();
-        const coverBase64 = coverData.choices?.[0]?.message?.images?.[0]?.image_url?.url;
-        if (coverBase64) {
-          const base64Data = coverBase64.replace(/^data:image\/\w+;base64,/, "");
-          const imageBytes = Uint8Array.from(atob(base64Data), (c) => c.charCodeAt(0));
-          const fileName = `${storyRecord.id}/cover.png`;
-          const { error: uploadError } = await supabase.storage
-            .from("story-images")
-            .upload(fileName, imageBytes, { contentType: "image/png", upsert: true });
-          if (!uploadError) {
-            const { data: urlData } = supabase.storage.from("story-images").getPublicUrl(fileName);
-            coverImageUrl = urlData.publicUrl;
-          }
+      // Fetch the image from Pollinations
+      const coverRes = await fetch(pollinationsCoverUrl);
+      if (coverRes.ok) {
+        const imageBytes = new Uint8Array(await coverRes.arrayBuffer());
+        const fileName = `${storyRecord.id}/cover.png`;
+        const { error: uploadError } = await supabase.storage
+          .from("story-images")
+          .upload(fileName, imageBytes, { contentType: "image/png", upsert: true });
+        if (!uploadError) {
+          const { data: urlData } = supabase.storage.from("story-images").getPublicUrl(fileName);
+          coverImageUrl = urlData.publicUrl;
         }
       }
     } catch (e) {
       console.error("Cover generation error:", e);
     }
 
-    // Save cover URL to story record
     if (coverImageUrl) {
       await supabase
         .from("stories")
@@ -188,67 +155,33 @@ Scene: ${story.pages[0].imagePrompt}`;
         .eq("id", storyRecord.id);
     }
 
-    // Step 4: Generate B&W coloring images for each page
+    // Step 4: Generate B&W coloring images using Pollinations.ai
     const pages = [];
 
     for (const page of story.pages) {
-      console.log(`Generating image for page ${page.pageNumber}...`);
-
-      const imageResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${LOVABLE_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "google/gemini-2.5-flash-image",
-          messages: [
-            {
-              role: "user",
-              content: `Create a simple black and white coloring book illustration for children.
-
-Style requirements:
-- Pure black and white line art only
-- Thick, clean outlines (like a children's coloring book)
-- Simple shapes, no shading or gradients
-- White background
-- Child-friendly and cute style
-- No text or words in the image
-
-Scene to illustrate: ${page.imagePrompt}`,
-            },
-          ],
-          modalities: ["image", "text"],
-        }),
-      });
-
-      if (!imageResponse.ok) {
-        console.error(`Image generation error for page ${page.pageNumber}`);
-        pages.push({
-          story_id: storyRecord.id,
-          page_number: page.pageNumber,
-          narrative_text: page.text,
-          image_url: null,
-        });
-        continue;
-      }
-
-      const imageData = await imageResponse.json();
-      const imageBase64 = imageData.choices?.[0]?.message?.images?.[0]?.image_url?.url;
+      console.log(`Generating image for page ${page.pageNumber} via Pollinations.ai...`);
 
       let imageUrl = null;
+      try {
+        const pagePrompt = encodeURIComponent(
+          `Simple black and white coloring book illustration for children, pure line art, thick clean outlines, no shading no gradients, white background, child-friendly cute style, no text or words. Scene: ${page.imagePrompt}`
+        );
+        const pollinationsPageUrl = `https://image.pollinations.ai/prompt/${pagePrompt}?width=1024&height=1024&nologo=true&seed=${Date.now() + page.pageNumber}`;
 
-      if (imageBase64) {
-        const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
-        const imageBytes = Uint8Array.from(atob(base64Data), (c) => c.charCodeAt(0));
-        const fileName = `${storyRecord.id}/page-${page.pageNumber}.png`;
-        const { error: uploadError } = await supabase.storage
-          .from("story-images")
-          .upload(fileName, imageBytes, { contentType: "image/png", upsert: true });
-        if (!uploadError) {
-          const { data: urlData } = supabase.storage.from("story-images").getPublicUrl(fileName);
-          imageUrl = urlData.publicUrl;
+        const imgRes = await fetch(pollinationsPageUrl);
+        if (imgRes.ok) {
+          const imageBytes = new Uint8Array(await imgRes.arrayBuffer());
+          const fileName = `${storyRecord.id}/page-${page.pageNumber}.png`;
+          const { error: uploadError } = await supabase.storage
+            .from("story-images")
+            .upload(fileName, imageBytes, { contentType: "image/png", upsert: true });
+          if (!uploadError) {
+            const { data: urlData } = supabase.storage.from("story-images").getPublicUrl(fileName);
+            imageUrl = urlData.publicUrl;
+          }
         }
+      } catch (e) {
+        console.error(`Image generation error for page ${page.pageNumber}:`, e);
       }
 
       pages.push({
