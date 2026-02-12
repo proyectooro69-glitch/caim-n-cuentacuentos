@@ -71,7 +71,7 @@ Cada página debe tener:
       ? `Create a 5-page story about: ${theme}`
       : `Crea un cuento de 5 páginas sobre: ${theme}`;
 
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
 
     const storyResponse = await fetch(geminiUrl, {
       method: "POST",
@@ -90,6 +90,12 @@ Cada página debe tener:
     if (!storyResponse.ok) {
       const errorText = await storyResponse.text();
       console.error("Gemini API error:", errorText);
+      if (storyResponse.status === 429) {
+        return new Response(
+          JSON.stringify({ error: isEnglish ? "Gemini quota exceeded. Please wait a minute and try again." : "Cuota de Gemini agotada. Espera un minuto e intenta de nuevo." }),
+          { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
       throw new Error("Failed to generate story text");
     }
 
