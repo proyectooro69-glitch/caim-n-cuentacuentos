@@ -1,7 +1,16 @@
 import { supabase } from "@/integrations/supabase/client";
 
 const GEMINI_API_KEY = "AIzaSyCjpu1GvxVyrbWT1Q5hZnLf4VA6vwPVUfk";
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
+
+const GEMINI_MODELS = [
+  "gemini-1.5-flash",
+  "gemini-2.0-flash-lite",
+  "gemini-2.0-flash",
+];
+
+function geminiUrl(model: string): string {
+  return `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
+}
 
 interface StoryPage {
   pageNumber: number;
@@ -24,15 +33,26 @@ interface GeneratedStory {
 /**
  * Translates a prompt to English using Gemini (for Pollinations which works best in English)
  */
-async function translateToEnglish(text: string): Promise<string> {
-  try {
-    const res = await fetch(GEMINI_URL, {
+async function fetchGemini(body: object): Promise<Response> {
+  for (const model of GEMINI_MODELS) {
+    const res = await fetch(geminiUrl(model), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: `Translate the following text to English. Return ONLY the translation, nothing else:\n\n${text}` }] }],
-        generationConfig: { temperature: 0.3, maxOutputTokens: 256 },
-      }),
+      body: JSON.stringify(body),
+    });
+    if (res.status === 404) continue; // model not available, try next
+    if (res.status === 429) continue; // quota exhausted, try next model
+    return res;
+  }
+  // All models failed — return a synthetic 429
+  return new Response(JSON.stringify({ error: { code: 429, message: "All models quota exhausted" } }), { status: 429 });
+}
+
+async function translateToEnglish(text: string): Promise<string> {
+  try {
+    const res = await fetchGemini({
+      contents: [{ role: "user", parts: [{ text: `Translate the following text to English. Return ONLY the translation, nothing else:\n\n${text}` }] }],
+      generationConfig: { temperature: 0.3, maxOutputTokens: 256 },
     });
     if (!res.ok) return text;
     const data = await res.json();
@@ -100,13 +120,9 @@ Cada página debe tener:
     ? `Create a 5-page story about: ${theme}`
     : `Crea un cuento de 5 páginas sobre: ${theme}`;
 
-  const res = await fetch(GEMINI_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] }],
-      generationConfig: { temperature: 0.9, maxOutputTokens: 4096 },
-    }),
+  const res = await fetchGemini({
+    contents: [{ role: "user", parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] }],
+    generationConfig: { temperature: 0.9, maxOutputTokens: 4096 },
   });
 
   if (!res.ok) {
