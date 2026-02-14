@@ -1,57 +1,48 @@
 import { supabase } from "../integrations/supabase/client";
 
-// Usamos la llave que configuraste en Netlify
-const API_KEY_ENV = import.meta.env.VITE_GEMINI_API_KEY;
-// Tu nueva llave de pago como respaldo
-const FALLBACK_KEY = "AIzaSyAM30mJ_heYlniYwoLR2McqfzjekM7cWcY";
-const GEMINI_API_KEY = API_KEY_ENV || FALLBACK_KEY;
+// Usamos la llave de pago que ya tienes configurada
+const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || "AIzaSyAM30mJ_heYlniYwoLR2McqfzjekM7cWcY";
 
-// URL CORREGIDA: Usamos v1beta y gemini-1.5-flash
+// URL ACTUALIZADA: Usamos v1beta y gemini-1.5-flash (el más estable para pago)
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
 
-interface ParsedStory {
-  title: string;
-  pages: { pageNumber: number; text: string; imagePrompt: string; }[];
-}
+export async function generateStory(theme: string, lang: "es" | "en", onProgress?: (m: string) => void) {
+  onProgress?.(lang === "en" ? "Creating..." : "Creando cuento...");
 
-async function callGemini(body: object): Promise<string> {
+  const prompt = `Escribe un cuento infantil de 5 páginas sobre ${theme}. Responde ÚNICAMENTE con este formato JSON: {"title": "Título", "pages": [{"pageNumber": 1, "text": "texto", "imagePrompt": "escena en inglés"}]}`;
+
   const res = await fetch(GEMINI_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    body: JSON.stringify({
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.7, maxOutputTokens: 2500 }
+    }),
   });
 
-  if (!res.ok) throw new Error(`Error IA (${res.status})`);
+  if (!res.ok) throw new Error(`Error de Google: ${res.status}`);
 
   const data = await res.json();
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error("Sin respuesta de IA");
-  return text;
-}
+  const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  const story = JSON.parse(rawText.replace(/```json/g, "").replace(/```/g, "").trim());
 
-export async function generateStory(theme: string, lang: "es" | "en", onProgress?: (m: string) => void) {
-  onProgress?.("Escribiendo cuento...");
-  
-  const prompt = `Escribe un cuento infantil de 5 páginas sobre ${theme}. Responde solo JSON: {"title": "Título", "pages": [{"pageNumber": 1, "text": "texto", "imagePrompt": "dibujo en inglés"}]}`;
-
-  const content = await callGemini({
-    contents: [{ role: "user", parts: [{ text: prompt }] }],
-    generationConfig: { temperature: 0.7, maxOutputTokens: 2000 },
-  });
-
-  const cleaned = content.replace(/```json/g, "").replace(/```/g, "").trim();
-  const story: ParsedStory = JSON.parse(cleaned);
-
-  const { data: storyRecord } = await supabase
+  // Guardamos en Supabase
+  const { data: storyRecord, error: dbError } = await supabase
     .from("stories")
-    .insert({ theme, title: story.title, cover_image_url: `https://image.pollinations.ai/prompt/${encodeURIComponent(story.pages[0].imagePrompt)}?width=768&height=1024&model=flux&seed=${Math.random()}` } as any)
+    .insert({ 
+      theme, 
+      title: story.title, 
+      cover_image_url: `https://image.pollinations.ai/prompt/${encodeURIComponent(story.pages[0].imagePrompt)}?width=768&height=1024&model=flux` 
+    } as any)
     .select().single();
 
-  const pageRows = story.pages.map(p => ({
+  if (dbError) throw new Error("Error al guardar en base de datos");
+
+  const pageRows = story.pages.map((p: any) => ({
     story_id: storyRecord.id,
     page_number: p.pageNumber,
     narrative_text: p.text,
-    image_url: `https://image.pollinations.ai/prompt/${encodeURIComponent(p.imagePrompt + " coloring book style")}?width=1024&height=1024&model=flux&seed=${Math.random()}`
+    image_url: `https://image.pollinations.ai/prompt/${encodeURIComponent(p.imagePrompt + " coloring book style")}?width=1024&height=1024&model=flux`
   }));
 
   await supabase.from("story_pages").insert(pageRows);
