@@ -1,14 +1,14 @@
 import { supabase } from "../integrations/supabase/client";
 
-// Priorizamos la variable de entorno de Netlify para seguridad
+// Variables de entorno de Netlify
 const API_KEY_ENV = import.meta.env.VITE_GEMINI_API_KEY;
 
-// Llave de respaldo (la nueva que generaste)
+// Tu nueva llave de pago como respaldo
 const FALLBACK_KEY = "AIzaSyAM30mJ_heYlniYwoLR2McqfzjekM7cWcY";
 
 const GEMINI_API_KEY = API_KEY_ENV || FALLBACK_KEY;
 
-// Usamos el modelo 1.5-flash: es más barato, rápido y estable para cuentas nuevas
+// Usamos el modelo 1.5-flash para mayor estabilidad con la cuenta de pago
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
 
 interface StoryPage {
@@ -31,7 +31,6 @@ interface GeneratedStory {
 
 function buildPollinationsUrl(prompt: string, width = 768, height = 768): string {
   const encoded = encodeURIComponent(prompt);
-  // Añadimos un seed aleatorio para que las imágenes siempre sean diferentes
   const seed = Math.floor(Math.random() * 1000000);
   return `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&model=flux&nologo=true&seed=${seed}`;
 }
@@ -44,7 +43,6 @@ async function callGemini(body: object): Promise<any> {
   });
 
   if (!res.ok) {
-    const errorData = await res.json().catch(() => ({}));
     if (res.status === 429) {
       throw new Error("Límite de mensajes alcanzado. Por favor, espera un momento.");
     }
@@ -60,36 +58,71 @@ async function callGemini(body: object): Promise<any> {
 async function translateToEnglish(text: string): Promise<string> {
   try {
     const result = await callGemini({
-      contents: [{ role: "user", parts: [{ text: `Translate the following description to English for an image generator. Return ONLY the translation:\n\n${text}` }] }],
+      contents: [{ role: "user", parts: [{ text: `Translate to English ONLY the description:\n\n${text}` }] }],
       generationConfig: { temperature: 0.3, maxOutputTokens: 200 },
     });
     return result.trim();
   } catch {
-    return text; // Si falla la traducción, enviamos el texto original
+    return text;
   }
 }
 
 async function generateStoryText(theme: string, lang: "es" | "en"): Promise<ParsedStory> {
   const isEn = lang === "en";
-
-  const prompt = `You are a professional children's book author. Write a creative, engaging 5-page story about: ${theme}.
-  
-  IMPORTANT: You must respond ONLY with a valid JSON object. Do not include markdown or explanations.
-  
-  Language of the story text: ${isEn ? 'English' : 'Spanish'}.
-  Language of the imagePrompt: Always English.
-
-  JSON Structure:
-  {
-    "title": "Story Title",
-    "pages": [
-      { "pageNumber": 1, "text": "2-3 simple sentences for children", "imagePrompt": "A detailed scene description in English for a coloring book" }
-    ]
-  }`;
+  const prompt = `Write a 5-page children's story about: ${theme}. 
+  Return ONLY a JSON object. Language: ${isEn ? 'English' : 'Spanish'}.
+  Format: {"title": "Title", "pages": [{"pageNumber": 1, "text": "text", "imagePrompt": "description in English"}]}`;
 
   const content = await callGemini({
     contents: [{ role: "user", parts: [{ text: prompt }] }],
     generationConfig: { temperature: 0.8, maxOutputTokens: 2500 },
   });
 
-  // Limpiamos posibles formatos de markdown que Gemini
+  const cleaned = content.replace(/```json/g, "").replace(/```/g, "").trim();
+  return JSON.parse(cleaned);
+}
+
+export async function generateStory(
+  theme: string,
+  lang: "es" | "en",
+  onProgress?: (msg: string) => void
+): Promise<GeneratedStory> {
+  const isEn = lang === "en";
+
+  onProgress?.(isEn ? "Imagining..." : "Imaginando...");
+  const story = await generateStoryText(theme, lang);
+
+  onProgress?.(isEn ? "Creating cover..." : "Creando portada...");
+  const coverImageUrl = buildPollinationsUrl(`Children's book cover, Pixar style: ${story.pages[0].imagePrompt}`, 768, 1024);
+
+  const { data: storyRecord, error: storyError } = await supabase
+    .from("stories")
+    .insert({ theme, title: story.title, cover_image_url: coverImageUrl } as any)
+    .select()
+    .single();
+
+  if (storyError) throw new Error("Error con la base de datos.");
+
+  onProgress?.(isEn ? "Drawing pages..." : "Dibujando páginas...");
+  
+  const pageRows = await Promise.all(
+    story.pages.map(async (page) => {
+      const bwPromptEn = `Coloring book page, black and white, thick lines: ${page.imagePrompt}`;
+      return {
+        story_id: storyRecord.id,
+        page_number: page.pageNumber,
+        narrative_text: page.text,
+        image_url: buildPollinationsUrl(bwPromptEn, 1024, 1024),
+      };
+    })
+  );
+
+  await supabase.from("story_pages").insert(pageRows);
+
+  return {
+    id: storyRecord.id,
+    title: story.title,
+    shareCode: storyRecord.share_code,
+    coverImageUrl,
+  };
+}
