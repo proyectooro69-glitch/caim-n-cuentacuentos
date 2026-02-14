@@ -1,6 +1,10 @@
 import { supabase } from "@/integrations/supabase/client";
 
-const GEMINI_API_KEY = "AIzaSyCjpu1GvxVyrbWT1Q5hZnLf4VA6vwPVUfk";
+// Buscamos la llave en las variables de entorno de Netlify (Vite)
+// Si no existe, usamos la llave manual como respaldo
+const API_KEY_ENV = import.meta.env.VITE_GEMINI_API_KEY;
+const GEMINI_API_KEY = API_KEY_ENV || "AIzaSyCjpu1GvxVyrbWT1Q5hZnLf4VA6vwPVUfk";
+
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
 
 interface StoryPage {
