@@ -1,9 +1,12 @@
-// ... (parte inicial del código igual)
-    
+export async function handler(event) {
+  try {
+    const { theme, lang } = JSON.parse(event.body);
+    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+
+    // Ajustamos el prompt para que sea MUY directo y no pierda tiempo en adornos
     const prompt = `Escribe un cuento infantil de 5 páginas sobre "${theme}". 
-    Sé breve en los textos para que la respuesta sea rápida. 
-    Responde ÚNICAMENTE en JSON puro: 
-    {"title": "Título", "pages": [{"pageNumber": 1, "text": "texto corto", "imagePrompt": "simple scene description"}]}`;
+    Responde ÚNICAMENTE con este JSON: 
+    {"title": "Título", "pages": [{"pageNumber": 1, "text": "máximo 20 palabras", "imagePrompt": "simple coloring page description"}]}`;
 
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
@@ -14,9 +17,26 @@
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
             temperature: 0.7,
-            maxOutputTokens: 2000, // Ajustado para 5 páginas
+            maxOutputTokens: 1000, // Reducir esto es CLAVE para la velocidad
           },
         }),
       }
     );
-// ... (resto del código igual)
+
+    if (!response.ok) {
+      return { statusCode: 500, body: JSON.stringify({ error: "Google se tardó demasiado" }) };
+    }
+
+    const data = await response.json();
+    const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    const clean = rawText.replace(/```json/g, "").replace(/```/g, "").trim();
+    
+    return {
+      statusCode: 200,
+      headers: { "Content-Type": "application/json" },
+      body: clean,
+    };
+  } catch (error) {
+    return { statusCode: 500, body: JSON.stringify({ error: error.message }) };
+  }
+}
