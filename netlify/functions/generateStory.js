@@ -21,7 +21,7 @@ Responde ÚNICAMENTE con este formato JSON puro:
 `;
 
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${GEMINI_API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -62,25 +62,4 @@ Responde ÚNICAMENTE con este formato JSON puro:
         .replace(/```/g, "")
         .trim();
 
-      story = JSON.parse(clean);
-    } catch (err) {
-      return {
-        statusCode: 500,
-        body: JSON.stringify({
-          error: "Invalid JSON from AI",
-          raw: rawText,
-        }),
-      };
-    }
-
-    return {
-      statusCode: 200,
-      body: JSON.stringify(story),
-    };
-  } catch (error) {
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ error: error.message }),
-    };
-  }
-}
+      story = JS
