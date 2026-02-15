@@ -1,10 +1,10 @@
 import { supabase } from "../integrations/supabase/client";
 
-// Usamos la llave de pago que ya tienes configurada
-const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || "AIzaSyAM30mJ_heYlniYwoLR2McqfzjekM7cWcY";
+// API Key directa
+const GEMINI_API_KEY = "AIzaSyCjpu1GvxVyrbWT1Q5hZnLf4VA6vwPVUfk";
 
-// URL ACTUALIZADA: Usamos v1beta y gemini-1.5-flash (el más estable para pago)
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+// Endpoint correcto: v1 (no v1beta) + gemini-1.5-flash
+const GEMINI_URL = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
 
 export async function generateStory(theme: string, lang: "es" | "en", onProgress?: (m: string) => void) {
   onProgress?.(lang === "en" ? "Creating..." : "Creando cuento...");
@@ -20,7 +20,11 @@ export async function generateStory(theme: string, lang: "es" | "en", onProgress
     }),
   });
 
-  if (!res.ok) throw new Error(`Error de Google: ${res.status}`);
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}));
+    console.error("Gemini API error:", res.status, errBody);
+    throw new Error(`Error de Google (${res.status}): ${errBody?.error?.message || "Sin detalles"}`);
+  }
 
   const data = await res.json();
   const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
@@ -46,5 +50,5 @@ export async function generateStory(theme: string, lang: "es" | "en", onProgress
   }));
 
   await supabase.from("story_pages").insert(pageRows);
-  return { id: storyRecord.id, shareCode: storyRecord.share_code };
+  return { id: storyRecord.id, title: story.title, shareCode: storyRecord.share_code };
 }
