@@ -1,24 +1,9 @@
-export async function handler(event) {
-  try {
-    const { theme, lang } = JSON.parse(event.body);
-
-    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-
-    const prompt = `
-Actúa como un escritor experto de cuentos infantiles.
-Escribe un cuento de 5 páginas sobre "${theme}".
-Responde ÚNICAMENTE con este formato JSON puro:
-{
-  "title": "Título",
-  "pages": [
-    {
-      "pageNumber": 1,
-      "text": "texto",
-      "imagePrompt": "scene description in english"
-    }
-  ]
-}
-`;
+// ... (parte inicial del código igual)
+    
+    const prompt = `Escribe un cuento infantil de 5 páginas sobre "${theme}". 
+    Sé breve en los textos para que la respuesta sea rápida. 
+    Responde ÚNICAMENTE en JSON puro: 
+    {"title": "Título", "pages": [{"pageNumber": 1, "text": "texto corto", "imagePrompt": "simple scene description"}]}`;
 
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
@@ -29,37 +14,9 @@ Responde ÚNICAMENTE con este formato JSON puro:
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
             temperature: 0.7,
-            maxOutputTokens: 2500,
+            maxOutputTokens: 2000, // Ajustado para 5 páginas
           },
         }),
       }
     );
-
-    if (!response.ok) {
-      const error = await response.text();
-      return {
-        statusCode: 500,
-        body: JSON.stringify({ error }),
-      };
-    }
-
-    const data = await response.json();
-    const rawText =
-      data.candidates?.[0]?.content?.parts?.[0]?.text;
-
-    if (!rawText) {
-      return {
-        statusCode: 500,
-        body: JSON.stringify({ error: "No content from Gemini" }),
-      };
-    }
-
-    let story;
-
-    try {
-      const clean = rawText
-        .replace(/```json/g, "")
-        .replace(/```/g, "")
-        .trim();
-
-      story = JS
+// ... (resto del código igual)
