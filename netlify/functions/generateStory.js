@@ -3,10 +3,10 @@ export async function handler(event) {
     const { theme, lang } = JSON.parse(event.body);
     const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-    // Ajustamos el prompt para que sea MUY directo y no pierda tiempo en adornos
+    // Ajuste de "velocidad": Le pedimos textos muy cortos para cumplir con los 10 segundos
     const prompt = `Escribe un cuento infantil de 5 páginas sobre "${theme}". 
     Responde ÚNICAMENTE con este JSON: 
-    {"title": "Título", "pages": [{"pageNumber": 1, "text": "máximo 20 palabras", "imagePrompt": "simple coloring page description"}]}`;
+    {"title": "Título", "pages": [{"pageNumber": 1, "text": "máximo 15 palabras", "imagePrompt": "simple coloring book style scene"}]}`;
 
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
@@ -17,14 +17,14 @@ export async function handler(event) {
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
             temperature: 0.7,
-            maxOutputTokens: 1000, // Reducir esto es CLAVE para la velocidad
+            maxOutputTokens: 800, // Menos tokens = respuesta mucho más rápida
           },
         }),
       }
     );
 
     if (!response.ok) {
-      return { statusCode: 500, body: JSON.stringify({ error: "Google se tardó demasiado" }) };
+      return { statusCode: 500, body: JSON.stringify({ error: "Google no respondió a tiempo" }) };
     }
 
     const data = await response.json();
