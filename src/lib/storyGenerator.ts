@@ -10,8 +10,8 @@ export async function generateStory(
       lang === "en" ? "Creating magic..." : "Creando cuento mágico..."
     );
 
-    // 1️⃣ Generar historia (texto)
-    const res = await fetch("/.netlify/functions/generateStory", {
+    // 1️⃣ Generar historia (texto) - AHORA EN VERCEL
+    const res = await fetch("/api/generateStory", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ theme, lang }),
@@ -28,12 +28,12 @@ export async function generateStory(
       throw new Error("La historia generada es inválida");
     }
 
-    // 2️⃣ Generar imagen de portada
+    // 2️⃣ Generar imagen de portada - AHORA EN VERCEL
     onProgress?.(
       lang === "en" ? "Creating cover..." : "Creando portada..."
     );
 
-    const coverRes = await fetch("/.netlify/functions/generateImage", {
+    const coverRes = await fetch("/api/generateImage", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -63,7 +63,7 @@ export async function generateStory(
 
     if (dbError) throw new Error(dbError.message);
 
-    // 4️⃣ Generar imágenes de cada página
+    // 4️⃣ Generar imágenes de cada página - AHORA EN VERCEL
     onProgress?.(
       lang === "en" ? "Creating illustrations..." : "Creando ilustraciones..."
     );
@@ -71,7 +71,7 @@ export async function generateStory(
     const pageRows = [];
 
     for (const p of story.pages) {
-      const imageRes = await fetch("/.netlify/functions/generateImage", {
+      const imageRes = await fetch("/api/generateImage", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
