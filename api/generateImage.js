@@ -26,6 +26,9 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Prompt is required' });
     }
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
+
     const response = await fetch(
       'https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell',
       {
@@ -34,9 +37,12 @@ export default async function handler(req, res) {
           Authorization: `Bearer ${HUGGINGFACE_TOKEN}`,
           'Content-Type': 'application/json'
         },
+        signal: controller.signal,
         body: JSON.stringify({ inputs: prompt })
       }
     );
+
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -75,6 +81,10 @@ export default async function handler(req, res) {
       image: `data:image/jpeg;base64,${base64}`
     });
   } catch (error) {
+    if (error.name === 'AbortError') {
+      console.error('HuggingFace API timeout after 60 seconds');
+      return res.status(504).json({ error: 'Image generation timeout' });
+    }
     console.error('Error in generateImage:', error);
     return res.status(500).json({
       error: error.message || 'Internal server error'

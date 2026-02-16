@@ -28,53 +28,53 @@ export default async function handler(req, res) {
 
     const isEnglish = lang === 'en';
     const systemPrompt = isEnglish
-      ? `Create a children's story in English. Respond ONLY with valid JSON, no markdown.
+      ? `You are a children's story writer. Generate ONLY pure JSON, no markdown, no text before or after JSON.
 
-Format:
 {
-  "title": "Story title",
+  "title": "Story Title",
   "pages": [
-    {
-      "pageNumber": 1,
-      "text": "Short narrative (2-3 sentences)",
-      "imagePrompt": "Description for coloring book image"
-    }
+    {"pageNumber": 1, "text": "One sentence.", "imagePrompt": "image description"},
+    {"pageNumber": 2, "text": "One sentence.", "imagePrompt": "image description"},
+    {"pageNumber": 3, "text": "One sentence.", "imagePrompt": "image description"}
   ]
 }`
-      : `Crea un cuento infantil en español. Responde ÚNICAMENTE con JSON válido, sin markdown.
+      : `Eres un escritor de cuentos infantiles. Genera SOLO JSON válido, sin markdown, sin texto antes ni después.
 
-Formato:
 {
-  "title": "Título del cuento",
+  "title": "Título",
   "pages": [
-    {
-      "pageNumber": 1,
-      "text": "Texto narrativo (2-3 oraciones)",
-      "imagePrompt": "Descripción para imagen de libro para colorear"
-    }
+    {"pageNumber": 1, "text": "Una oración.", "imagePrompt": "descripción de imagen"},
+    {"pageNumber": 2, "text": "Una oración.", "imagePrompt": "descripción de imagen"},
+    {"pageNumber": 3, "text": "Una oración.", "imagePrompt": "descripción de imagen"}
   ]
 }`;
 
     const userPrompt = isEnglish
-      ? `Create a 5-page story about: ${theme}`
-      : `Crea un cuento de 5 páginas sobre: ${theme}`;
+      ? `3-page story about ${theme}. One sentence per page. Return ONLY JSON.`
+      : `Cuento de 3 páginas sobre ${theme}. Una oración por página. Devuelve SOLO JSON.`;
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
 
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({
           contents: [
-            { role: 'user', parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] }
+            { role: 'user', parts: [{ text: `${systemPrompt}\n\nUser request: ${userPrompt}` }] }
           ],
           generationConfig: {
-            temperature: 0.9,
-            maxOutputTokens: 4096
+            temperature: 0.7,
+            maxOutputTokens: 1024
           }
         })
       }
     );
+
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -93,12 +93,22 @@ Formato:
     let rawText = data.candidates[0].content.parts[0].text;
     rawText = rawText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
 
+    const jsonStart = rawText.indexOf('{');
+    const jsonEnd = rawText.lastIndexOf('}');
+
+    if (jsonStart === -1 || jsonEnd === -1 || jsonEnd < jsonStart) {
+      console.error('No valid JSON found in response:', rawText.substring(0, 200));
+      return res.status(500).json({ error: 'No valid JSON in response' });
+    }
+
+    rawText = rawText.substring(jsonStart, jsonEnd + 1);
+
     let story;
     try {
       story = JSON.parse(rawText);
     } catch (parseError) {
-      console.error('Failed to parse story JSON:', parseError);
-      return res.status(500).json({ error: 'Failed to parse story content' });
+      console.error('Failed to parse story JSON:', parseError.message, 'Text:', rawText.substring(0, 300));
+      return res.status(500).json({ error: 'Invalid JSON format' });
     }
 
     if (!story.title || !Array.isArray(story.pages) || story.pages.length === 0) {
@@ -107,6 +117,10 @@ Formato:
 
     return res.status(200).json(story);
   } catch (error) {
+    if (error.name === 'AbortError') {
+      console.error('Gemini API timeout after 30 seconds');
+      return res.status(504).json({ error: 'API timeout' });
+    }
     console.error('Error in generateStory:', error);
     return res.status(500).json({
       error: error.message || 'Internal server error'
