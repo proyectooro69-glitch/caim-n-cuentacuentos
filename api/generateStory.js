@@ -7,14 +7,17 @@ export default async function handler(req, res) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: `Escribe un cuento de 5 páginas sobre ${theme}. Responde solo en JSON: {"title": "...", "pages": [{"pageNumber": 1, "text": "...", "imagePrompt": "..."}]}` }] }]
+        contents: [{ parts: [{ text: `Genera un JSON para un cuento infantil sobre ${theme}. Estructura exacta: {"title": "...", "pages": [{"pageNumber": 1, "text": "...", "imagePrompt": "..."}]}` }] }]
       })
     });
 
     const data = await response.json();
-    const text = data.candidates[0].content.parts[0].text.replace(/```json|```/g, "").trim();
+    if (!data.candidates) throw new Error("Google no respondió correctamente");
     
-    res.status(200).json(JSON.parse(text));
+    const rawText = data.candidates[0].content.parts[0].text;
+    const cleanText = rawText.replace(/```json|```/g, "").trim();
+    
+    res.status(200).json(JSON.parse(cleanText));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
